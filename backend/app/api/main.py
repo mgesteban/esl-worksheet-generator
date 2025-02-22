@@ -18,7 +18,7 @@ from app.core.dependencies import get_student_extraction_service
 from app.services.student_extractor import StudentExtractionService
 from app.api.models.transcription import TranscriptionCreate
 from app.api.models.student import StudentDetailResponse
-from app.api.routes import worksheets
+from app.api.routes import worksheets, websocket
 
 app = FastAPI(
     title="ESL Worksheet Generator API",
@@ -28,6 +28,7 @@ app = FastAPI(
 
 # Include routers
 app.include_router(worksheets.router, tags=["worksheets"])
+app.include_router(websocket.router, tags=["websocket"])
 
 @app.post("/transcriptions/", response_model=Dict[str, Any])
 async def process_transcription(
@@ -135,4 +136,4 @@ def get_student_interviews(
     student = session.get(Student, student_id)
     if student is None:
         raise HTTPException(status_code=404, detail="Student not found")
-    return student.interviews 
+    return student.interviews

@@ -3,10 +3,10 @@
 This module defines the application settings using Pydantic's BaseSettings.
 """
 
-from pydantic import BaseModel
+from pydantic_settings import BaseSettings
 from functools import lru_cache
 
-class Settings(BaseModel):
+class Settings(BaseSettings):
     """Application settings.
     
     Attributes:
@@ -18,12 +18,14 @@ class Settings(BaseModel):
     """
     DATABASE_URL: str = "postgresql://postgres:postgres@localhost/esl_worksheet"
     AI_SERVICE_URL: str = "https://api.openai.com/v1"
-    AI_SERVICE_KEY: str = ""
+    OPENAI_API_KEY: str = ""
+    OPENAI_ORG_ID: str = ""  # Optional: Organization ID for OpenAI API
     PDF_SERVICE_URL: str = "http://localhost:8001"
     STORAGE_PATH: str = "./storage"
 
     class Config:
         env_file = ".env"
+        env_file_encoding = 'utf-8'
 
 @lru_cache()
 def get_settings() -> Settings:

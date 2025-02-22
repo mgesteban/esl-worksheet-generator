@@ -8,12 +8,12 @@ import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
-// Replace with your actual server endpoints
-const HLS_SERVER_URL = 'https://command.otter-hamal.ts.net';
-const API_BASE_URL = 'http://localhost:8000';
+// Server endpoints
+const HLS_SERVER_URL = 'http://localhost:8001';
+const API_BASE_URL = 'http://localhost:8001';
 
 interface TranscriptionResponse {
-  type: 'transcription' | 'error' | 'config_ack' | 'status';
+  type: 'transcription' | 'error' | 'config_ack' | 'status' | 'ping';
   text?: string;
   start?: number;
   end?: number;
@@ -231,32 +231,37 @@ const StudentForm = () => {
   };
 
   const initializeWebSocket = () => {
-    const ws = new WebSocket(HLS_SERVER_URL.replace('https', 'wss'));
+    console.log('Initializing WebSocket connection...');
+    const ws = new WebSocket(`ws://localhost:8001/ws/audio/${uidRef.current}`);
 
     ws.onopen = () => {
       console.log('WebSocket connection established');
       setTotalSeconds(0); // Reset total seconds when starting new recording
-      // Send configuration
-      const config = {
-        uid: uidRef.current,
-        language: "es",
-        task: "transcribe",
-        model: "large"
-      };
-      ws.send(JSON.stringify(config));
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      setFeedback('Error connecting to transcription server');
     };
 
     ws.onmessage = (event) => {
       const response: TranscriptionResponse = JSON.parse(event.data);
+      console.log('WebSocket message received:', response);
       
       switch (response.type) {
+        case 'ping':
+          // Respond to server ping
+          console.log('Received ping from server');
+          break;
         case 'transcription':
           if (response.text) {
+            console.log('Received transcription:', response.text);
             setTranscription(prev => prev + ' ' + response.text);
           }
           break;
         case 'status':
           if (response.message) {
+            console.log('Received status:', response.message);
             // Update total seconds if available
             if (response.accumulated_seconds) {
               setTotalSeconds(response.accumulated_seconds);
@@ -288,6 +293,7 @@ const StudentForm = () => {
           }
           break;
         case 'error':
+          console.error('Received error:', response.message);
           setFeedback(response.message || 'Unknown error');
           break;
       }
@@ -295,14 +301,19 @@ const StudentForm = () => {
 
     ws.onerror = (error) => {
       console.error('WebSocket error:', error);
-      setFeedback('Error connecting to transcription server');
+      setFeedback('Error connecting to transcription server. Please try again.');
+      stopRecording();
     };
 
-    ws.onclose = () => {
-      console.log('WebSocket closed');
+    ws.onclose = (event) => {
+      console.log('WebSocket closed:', event);
       setProcessingStatus('');
       if (noSpeechTimeoutRef.current) {
         clearTimeout(noSpeechTimeoutRef.current);
+      }
+      if (isRecording) {
+        setFeedback('Connection to transcription server lost. Please try again.');
+        stopRecording();
       }
     };
 
@@ -348,9 +359,46 @@ const StudentForm = () => {
       // Process audio data
       processor.onaudioprocess = (e) => {
         if (websocketRef.current?.readyState === WebSocket.OPEN) {
-          const inputData = e.inputBuffer.getChannelData(0);
-          // Send raw float32 audio data
-          websocketRef.current.send(inputData.buffer);
+          console.log('Processing audio chunk...');
+          // Convert audio data to WAV format
+          const audioData = e.inputBuffer.getChannelData(0);
+          console.log('Audio data length:', audioData.length);
+          
+          // Create WAV header
+          const buffer = new ArrayBuffer(44 + audioData.length * 2);
+          const view = new DataView(buffer);
+          console.log('Created buffer of size:', buffer.byteLength);
+          
+          // Write WAV header
+          // "RIFF" chunk descriptor
+          writeString(view, 0, 'RIFF');
+          view.setUint32(4, 36 + audioData.length * 2, true);
+          writeString(view, 8, 'WAVE');
+          
+          // "fmt " sub-chunk
+          writeString(view, 12, 'fmt ');
+          view.setUint32(16, 16, true); // fmt chunk size
+          view.setUint16(20, 1, true); // audio format (PCM)
+          view.setUint16(22, 1, true); // num channels (mono)
+          view.setUint32(24, 16000, true); // sample rate
+          view.setUint32(28, 16000 * 2, true); // byte rate
+          view.setUint16(32, 2, true); // block align
+          view.setUint16(34, 16, true); // bits per sample
+          
+          // "data" sub-chunk
+          writeString(view, 36, 'data');
+          view.setUint32(40, audioData.length * 2, true);
+          
+          // Write audio data
+          const length = audioData.length;
+          let index = 44;
+          for (let i = 0; i < length; i++) {
+            view.setInt16(index, audioData[i] * 32767, true);
+            index += 2;
+          }
+          
+          console.log('Sending audio data of size:', buffer.byteLength);
+          websocketRef.current.send(buffer);
         }
       };
 
@@ -423,6 +471,13 @@ const StudentForm = () => {
         }
       }
     }, 60000);
+  };
+
+  // Helper function to write strings to DataView
+  const writeString = (view: DataView, offset: number, string: string) => {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
   };
 
   return (
@@ -575,4 +630,4 @@ const StudentForm = () => {
   );
 };
 
-export default StudentForm; 
+export default StudentForm;
